@@ -1,0 +1,13 @@
+# Render free-tier deployment for the Keylogger Simulation & Detection Lab.
+# Create the service from the public GitHub repo.
+# Free tier sleeps after inactivity: open the URL once and it wakes in ~30s.
+services:
+  - type: web
+    name: keylogger-detection-lab
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 24.22.1
