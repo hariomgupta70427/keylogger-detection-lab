@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Keylogger Simulation &amp; Detection Lab — BHEL CDT 2026</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark">⌁</div>
+      <div>
+        <h1>Keylogger Simulation &amp; Detection Lab</h1>
+        <p class="subtitle">Catching an invisible attack by the traces it cannot hide</p>
+      </div>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip">MITRE ATT&amp;CK T1056.001</span>
+      <span class="chip">T1041</span>
+      <span class="chip">T1547.001</span>
+      <span class="chip chip-lab" id="labStatus">LAB-VM-01 · idle</span>
+      <span class="chip" id="sessionClock" title="Lab session hard stop (2 hours, enforced in code)">session 2:00:00</span>
+      <button class="btn btn-ghost" id="resetLabBtn" title="Reset the whole lab to a clean state">Reset lab</button>
+    </div>
+  </div>
+  <div class="safety-strip">
+    <strong>Lab-only simulation.</strong>
+    <span>Nothing here touches a real keyboard, a real process table or a real mailbox. The “victim machine” is a model, keystrokes are captured only inside this page’s own demo fields, and “sent” mail only ever lands in the on-screen outbox. Stop hotkey: <kbd>Esc</kbd> · 2-hour hard stop enforced.</span>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-tab="console" role="tab">Lab console</button>
+  <button class="tab" data-tab="chain" role="tab">Attack chain</button>
+  <button class="tab" data-tab="tests" role="tab">Test suite · 12 cases</button>
+  <button class="tab" data-tab="learn" role="tab">Learn</button>
+  <button class="tab" data-tab="arch" role="tab">Architecture</button>
+</nav>
+
+<main>
+<!-- ============ TAB: LAB CONSOLE ============ -->
+<section id="tab-console" class="tabpanel active">
+  <div class="console-grid">
+
+    <!-- Victim VM -->
+    <div class="panel vm-panel">
+      <div class="panel-head">
+        <h2>Victim VM <span class="mono muted">LAB-VM-01 · Windows 11</span></h2>
+        <span class="pill" id="simPill">logger stopped</span>
+      </div>
+      <p class="panel-note">Type in the demo windows below. When the simulated keylogger is running, every keystroke here is captured into its in-memory buffer — exactly like the real attack, but sandboxed to this page. Use fake credentials.</p>
+
+      <div class="demo-desktop">
+        <div class="demo-window">
+          <div class="demo-titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="demo-title">CorpMail — Sign in</span><span class="capture-tag" id="capTagLogin">not capturing</span></div>
+          <label>Username<input type="text" class="demo-input" id="loginUser" data-field="corpmail-username" placeholder="e.g. vanshika.tyagi" autocomplete="off"></label>
+          <label>Password<input type="password" class="demo-input" id="loginPass" data-field="corpmail-password" placeholder="type a fake password" autocomplete="off"></label>
+          <button class="btn btn-small" id="fakeLoginBtn" type="button">Sign in (fake)</button>
+          <p class="demo-hint" id="loginMsg">This form goes nowhere. It exists so the logger has something worth stealing.</p>
+        </div>
+
+        <div class="demo-window">
+          <div class="demo-titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="demo-title">Notepad — notes.txt</span><span class="capture-tag" id="capTagNotes">not capturing</span></div>
+          <textarea class="demo-input demo-notes" id="notesBox" data-field="notepad" rows="4" placeholder="Type anything here — meeting notes, an OTP, a card number…"></textarea>
+          <p class="demo-hint">Try copying text out of here with clipboard capture on.</p>
+        </div>
+
+        <div class="demo-window">
+          <div class="demo-titlebar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="demo-title">Bank portal — demo</span><span class="capture-tag" id="capTagBank">not capturing</span></div>
+          <label>Customer ID<input type="text" class="demo-input" id="bankUser" data-field="bank-customer-id" placeholder="e.g. 48291057" autocomplete="off"></label>
+          <label>Password<input type="password" class="demo-input" id="bankPass" data-field="bank-password" placeholder="fake password" autocomplete="off"></label>
+        </div>
+      </div>
+
+      <div class="controls">
+        <h3>Keylogger controls</h3>
+        <div class="control-row">
+          <label>Flush every
+            <select id="flushSeconds">
+              <option value="15">15 sec</option>
+              <option value="30" selected>30 sec</option>
+              <option value="60">60 sec</option>
+              <option value="300">5 min (as in the report)</option>
+            </select>
+          </label>
+          <label class="toggle"><input type="checkbox" id="optPersist"> Persist at login (Run key)</label>
+          <label class="toggle"><input type="checkbox" id="optClipboard"> Clipboard logging</label>
+          <label class="toggle"><input type="checkbox" id="optShots"> Screenshot capture</label>
+        </div>
+        <div class="control-row">
+          <button class="btn btn-start" id="startSimBtn">Start keylogger</button>
+          <button class="btn btn-stop" id="stopSimBtn" disabled>Stop (or press Esc)</button>
+          <button class="btn" id="flushNowBtn" disabled>Flush now</button>
+        </div>
+        <p class="control-error" id="simError"></p>
+      </div>
+
+      <div class="stat-strip">
+        <div class="stat"><span class="stat-num" id="statKeys">0</span><span class="stat-label">keys captured</span></div>
+        <div class="stat"><span class="stat-num" id="statBuffered">0</span><span class="stat-label">in buffer (memory only)</span></div>
+        <div class="stat"><span class="stat-num" id="statFlushes">0</span><span class="stat-label">flush cycles</span></div>
+        <div class="stat"><span class="stat-num" id="statLost">0</span><span class="stat-label">keys lost</span></div>
+        <div class="stat"><span class="stat-num" id="statNextFlush">—</span><span class="stat-label">next flush in</span></div>
+      </div>
+
+      <h3>Live keystroke buffer <span class="muted mono small">memory only — never written to disk</span></h3>
+      <pre class="logbox" id="bufferBox">Buffer empty. Start the keylogger and type in the demo windows above.</pre>
+    </div>
+
+    <!-- Exfil + detector column -->
+    <div class="side-col">
+      <div class="panel">
+        <div class="panel-head"><h2>Exfil outbox <span class="mono muted">SMTP_SSL :465 (simulated)</span></h2></div>
+        <p class="panel-note">Every flush packages the buffer and “emails” it. No real email is ever sent — transmissions land here.</p>
+        <div id="outboxList" class="feed"><p class="muted">No transmissions yet.</p></div>
+        <h3>Clipboard log</h3>
+        <div id="clipboardList" class="feed"><p class="muted">Clipboard capture off — nothing logged.</p></div>
+        <h3>Screenshots</h3>
+        <div id="shotsList" class="feed"><p class="muted">Screenshot capture off — nothing captured.</p></div>
+      </div>
+
+      <div class="panel detector-panel">
+        <div class="panel-head"><h2>Detector</h2><span class="pill" id="verdictPill">not scanned yet</span></div>
+        <p class="panel-note">Four rules, each matching one trace the attack leaves behind. Every scan is saved to <span class="mono">detection.db</span> (SQLite), so results are reproducible.</p>
+        <div class="control-row">
+          <button class="btn" id="baselineBtn">Take clean baseline</button>
+          <button class="btn btn-scan" id="scanBtn">Scan now</button>
+        </div>
+        <p class="panel-note mono small" id="baselineNote">Baseline taken at server start.</p>
+        <div id="findingsList" class="findings"><p class="muted">No scan run yet. Start the keylogger, type something, then scan.</p></div>
+        <h3>Scan history <span class="muted small">(from detection.db)</span></h3>
+        <table class="mini-table" id="scanHistory">
+          <thead><tr><th>#</th><th>Time</th><th>Verdict</th><th>Findings</th><th>ms</th></tr></thead>
+          <tbody><tr><td colspan="5" class="muted">No scans recorded yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TAB: ATTACK CHAIN ============ -->
+<section id="tab-chain" class="tabpanel">
+  <div class="panel">
+    <h2>Every step of the attack leaves a trace</h2>
+    <p class="panel-note">Top: what the keylogger does. Bottom: what a defender can see. Live status on the right reflects the lab right now.</p>
+    <div class="chain">
+      <div class="chain-step" id="chainHook">
+        <div class="chain-num">1 · HOOK</div>
+        <h3>Attacker does</h3><p>Listens to every keypress system-wide (pynput).</p>
+        <h3>Leaves behind</h3><p>A non-UI process holding a keyboard-hook DLL.</p>
+        <div class="chain-live" data-live="hook">idle</div>
+      </div>
+      <div class="chain-step" id="chainBuffer">
+        <div class="chain-num">2 · BUFFER</div>
+        <h3>Attacker does</h3><p>Keeps keystrokes in memory, never on disk.</p>
+        <h3>Leaves behind</h3><p>Idle CPU use; typing lag if the callback does heavy work.</p>
+        <div class="chain-live" data-live="buffer">idle</div>
+      </div>
+      <div class="chain-step" id="chainFlush">
+        <div class="chain-num">3 · FLUSH</div>
+        <h3>Attacker does</h3><p>Every 5 minutes a timer packages the buffer.</p>
+        <h3>Leaves behind</h3><p>Regular, timer-driven bursts of activity.</p>
+        <div class="chain-live" data-live="flush">idle</div>
+      </div>
+      <div class="chain-step" id="chainSend">
+        <div class="chain-num">4 · SEND</div>
+        <h3>Attacker does</h3><p>Emails the log over SMTP_SSL, port 465.</p>
+        <h3>Leaves behind</h3><p>Outbound :465 from a non-mail program.</p>
+        <div class="chain-live" data-live="send">idle</div>
+      </div>
+      <div class="chain-step" id="chainPersist">
+        <div class="chain-num">5 · PERSIST</div>
+        <h3>Attacker does</h3><p>Restarts at login (studied in VM only).</p>
+        <h3>Leaves behind</h3><p>A new Run key or scheduled task.</p>
+        <div class="chain-live" data-live="persist">idle</div>
+      </div>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>What the defender can inspect right now</h2>
+    <p class="panel-note">The simulated system the detector reads — processes, startup entries and network connections on LAB-VM-01.</p>
+    <div class="inspect-grid">
+      <div><h3>Processes</h3><table class="mini-table" id="procTable"><thead><tr><th>PID</th><th>Name</th><th>User</th><th>Window</th><th>Modules</th></tr></thead><tbody></tbody></table></div>
+      <div><h3>Startup entries</h3><table class="mini-table" id="startupTable"><thead><tr><th>Location</th><th>Name</th></tr></thead><tbody></tbody></table></div>
+      <div><h3>Network connections</h3><table class="mini-table" id="connTable"><thead><tr><th>Process</th><th>Local → Remote</th><th>State</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TAB: TEST SUITE ============ -->
+<section id="tab-tests" class="tabpanel">
+  <div class="panel">
+    <h2>12 test cases, zero misses — run them yourself</h2>
+    <p class="panel-note">Each case builds its own sandboxed system state, runs the real detector rules against it, and asserts the expected outcome. A pass means the rule genuinely fired (or genuinely stayed quiet). The live lab is not disturbed.</p>
+    <div class="control-row">
+      <button class="btn btn-scan" id="runTestsBtn">Run all 12 cases</button>
+      <span class="mono" id="suiteSummary">Not run yet in this session.</span>
+    </div>
+    <div id="testResults" class="test-list"><p class="muted">Press “Run all 12 cases”.</p></div>
+    <h3>What the BHEL lab measured</h3>
+    <div class="stat-strip">
+      <div class="stat"><span class="stat-num">12/12</span><span class="stat-label">attack runs caught on first scan</span></div>
+      <div class="stat"><span class="stat-num">0</span><span class="stat-label">false alarms in 10 clean scans</span></div>
+      <div class="stat"><span class="stat-num">0.7%</span><span class="stat-label">average CPU cost (target &lt; 2%)</span></div>
+      <div class="stat"><span class="stat-num">20/20</span><span class="stat-label">flush cycles, no key lost or repeated</span></div>
+    </div>
+    <p class="panel-note"><strong>Honest limits.</strong> Measured in the lab on one Windows 11 build, one user-mode Python keylogger family, with simple string and port rules. A sophisticated sample could evade them. Windows Defender flagged the packaged .exe within seconds — but missed the raw .py script. Signatures catch the known; behaviour catches the rest.</p>
+  </div>
+</section>
+
+<!-- ============ TAB: LEARN ============ -->
+<section id="tab-learn" class="tabpanel">
+  <div class="learn-grid">
+    <div class="panel">
+      <h2>What is a keylogger?</h2>
+      <p>A keylogger (keystroke logger) is surveillance technology that records each keystroke typed on a computer’s keyboard. Think of someone watching you type over your shoulder: the keys are seen <em>before</em> they are ever encrypted. That is why a keylogger steals passwords without breaking encryption — anything that reads the keyboard stream captures passwords and OTPs. It needs one global hook and a few dozen lines of Python.</p>
+      <h3>Types</h3>
+      <ul class="clean-list">
+        <li><strong>Software — kernel-level:</strong> operates at OS kernel level, deep access, hardest to detect.</li>
+        <li><strong>Software — API-level:</strong> hooks the APIs the OS uses to receive keystroke data.</li>
+        <li><strong>Software — form grabbers:</strong> capture data submitted in web forms before it is encrypted (e.g. banking sites).</li>
+        <li><strong>Hardware:</strong> physical devices between keyboard and CPU (USB / PS/2), or embedded in the keyboard; wireless sniffers. Harder to detect through software, but need physical access.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h2>Real-world incidents</h2>
+      <p>Keylogging is the entry point, not the payload. Real incidents show why catching it early matters.</p>
+      <ul class="timeline">
+        <li><strong>2007–11 · Zeus</strong> — keylogging plus form grabbing to steal banking logins. Operation Trident Breach: 100+ arrests, about $70M stolen.</li>
+        <li><strong>2010 · ATM heist, Europe</strong> — a keylogger installed via USB drives helped steal credentials used to withdraw large sums from ATMs across the continent.</li>
+        <li><strong>2011–14 · GameOver Zeus</strong> — P2P variant that also spread CryptoLocker. Operation Tovar (2014): over $100M lost, 500k–1M PCs.</li>
+        <li><strong>2018–19 · HawkEye</strong> — malware-as-a-service, delivered at scale through invoice-themed phishing emails.</li>
+        <li><strong>2014–now · Agent Tesla</strong> — .NET remote access tool with keylogging and screen capture; COVID-themed phishing in 2020.</li>
+        <li><strong>Corporate espionage</strong> — rogue employees have installed keyloggers to monitor executives and steal trade secrets and financial documents.</li>
+      </ul>
+      <p class="panel-note">MFA and user awareness limit the damage: a stolen password alone is not enough.</p>
+    </div>
+    <div class="panel">
+      <h2>Detection &amp; countermeasures</h2>
+      <h3>Behavioural signs</h3>
+      <ul class="clean-list">
+        <li>Slow keyboard response or typing delays, especially if the logging buffer is poorly managed.</li>
+        <li>Unexplained CPU spikes when the system is idle.</li>
+      </ul>
+      <h3>Defensive tools</h3>
+      <ul class="clean-list">
+        <li><strong>Windows Defender</strong> with updated signatures — catches known samples (flagged the packaged .exe in seconds).</li>
+        <li><strong>Malwarebytes Anti-Rootkit</strong> — identifies and removes known keylogger patterns.</li>
+        <li><strong>KeyScrambler</strong> — encrypts keystrokes before they reach the OS, rendering most software keyloggers useless.</li>
+        <li><strong>Sysinternals Process Explorer</strong> — reveals hidden or suspicious processes in more detail than Task Manager.</li>
+      </ul>
+      <h3>Manual inspection</h3>
+      <ul class="clean-list">
+        <li>Open <span class="mono">msconfig</span> or <span class="mono">taskschd.msc</span> and inspect startup entries and scheduled tasks.</li>
+        <li>Use <span class="mono">tasklist /v</span> or Task Manager to spot unfamiliar processes, especially ones masquerading under generic names.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h2>The legal line — India</h2>
+      <ul class="clean-list">
+        <li><strong>IT Act s.43</strong> — unauthorised access, civil liability.</li>
+        <li><strong>IT Act s.66</strong> — dishonest or fraudulent act, up to 3 years / ₹5 lakh.</li>
+        <li><strong>IT Act s.66C</strong> — identity theft, up to 3 years / ₹1 lakh.</li>
+        <li><strong>DPDP Act 2023</strong> — personal data protection duties.</li>
+        <li><strong>CERT-In</strong> — 6-hour incident reporting.</li>
+      </ul>
+      <p class="panel-note">Lawful only on your own machine or with written consent. Legal and ethical uses: employee monitoring <em>with informed consent</em>, parental control, and ethical hacking in controlled environments. Unauthorised installation on someone else’s device is a criminal offence.</p>
+      <h3>MITRE ATT&amp;CK mapping</h3>
+      <ul class="clean-list">
+        <li><strong>T1056.001</strong> — Input Capture: Keylogging</li>
+        <li><strong>T1041</strong> — Exfiltration Over C2 Channel</li>
+        <li><strong>T1547.001</strong> — Boot/Logon Autostart: Registry Run Keys</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TAB: ARCHITECTURE ============ -->
+<section id="tab-arch" class="tabpanel">
+  <div class="panel">
+    <h2>Architecture &amp; workflow</h2>
+    <p class="panel-note">The nine-step workflow from the summer-training report — how the simulation works, end to end.</p>
+    <ol class="workflow">
+      <li><strong>Initialization</strong> — the script starts silently as a background process (pythonw.exe, or a PyInstaller .exe with no console window).</li>
+      <li><strong>Keyboard listening</strong> — <span class="mono">pynput.keyboard.Listener</span> intercepts every keypress in real time, including Enter, Shift and Backspace.</li>
+      <li><strong>In-memory buffering</strong> — keystrokes sit in a list in memory; no disk I/O, nothing to find on the drive.</li>
+      <li><strong>Periodic log compilation</strong> — at fixed intervals (every 5 minutes) the buffer is compiled into a log.</li>
+      <li><strong>Secure email dispatch</strong> — the log is sent to a pre-configured address with <span class="mono">smtplib</span> over SMTP_SSL.</li>
+      <li><strong>Local cleanup</strong> — the local log is deleted after dispatch to minimise the forensic footprint.</li>
+      <li><strong>Persistent background execution</strong> — the logger keeps running until shutdown or manual termination.</li>
+      <li><strong>EXE conversion for stealth</strong> — PyInstaller packages it as a lightweight .exe (under 5 MB), easy to disguise as a system utility.</li>
+      <li><strong>Auto-execution on boot</strong> — startup folder entry or scheduled task relaunches it on every reboot.</li>
+    </ol>
+    <h3>Tools &amp; technologies</h3>
+    <div class="stat-strip">
+      <div class="stat"><span class="stat-num small-num">Python 3.10+</span><span class="stat-label">core language</span></div>
+      <div class="stat"><span class="stat-num small-num">pynput</span><span class="stat-label">keyboard capture</span></div>
+      <div class="stat"><span class="stat-num small-num">smtplib</span><span class="stat-label">SMTP dispatch</span></div>
+      <div class="stat"><span class="stat-num small-num">threading</span><span class="stat-label">log + send in parallel</span></div>
+      <div class="stat"><span class="stat-num small-num">SQLite</span><span class="stat-label">detection.db — scan history</span></div>
+    </div>
+    <h3>Enhancements the report points to</h3>
+    <ul class="clean-list">
+      <li>Real-time screenshot capture (pyautogui / mss) for visual context alongside text logs.</li>
+      <li>HTTPS-based encrypted log transfer instead of SMTP, to blend with legitimate traffic.</li>
+      <li>A centralised dashboard for managing multiple test environments in authorised red-team labs.</li>
+      <li>A GUI to configure intervals, addresses and triggers without editing code — this lab console is that GUI.</li>
+      <li>Next for the detector: Sysmon / ETW feeds, YARA scanning, Sigma rules.</li>
+    </ul>
+    <p class="panel-note">All enhancements strictly within ethical boundaries — penetration testing, red teaming, or simulated attack-defence training in authorised environments only.</p>
+  </div>
+</section>
+</main>
+
+<footer>
+  <p>Built as an educational demo from the BHEL summer-training documents — <strong>Keylogger Simulation &amp; Detection Tool</strong> by Vanshika Tyagi, B.Tech IT Sem VII, GTBIT (GGSIPU), BHEL Corporate Digital Transformation, New Delhi · Guide: Mr. Bharat Panwar · Summer Training 2026.</p>
+  <p class="muted">References: pynput docs · Wikipedia — Keystroke logging · Kaspersky — keyloggers · Malwarebytes · MITRE ATT&amp;CK T1056.001</p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
